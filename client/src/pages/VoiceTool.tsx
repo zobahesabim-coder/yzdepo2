@@ -51,6 +51,141 @@ function toneLabelById(id: string, tones: ToneLabel[]): string {
   return tones.find((t) => t.id === id)?.label || tones[0].label;
 }
 
+/**
+ * Turkish speech recognition often transliterates proper nouns and Turkish
+ * characters into English approximations. This function corrects common
+ * mismatches and restores Turkish characters that Chrome's tr-TR engine
+ * sometimes drops.
+ */
+const TURKISH_CORRECTIONS: Record<string, string> = {
+  // Common letter substitutions the engine makes in tr-TR mode
+  "c": "ç", "g": "ğ", "i": "ı", "o": "ö", "s": "ş", "u": "ü",
+};
+
+// Words that should NOT be auto-corrected (keep as-is when the engine returns them)
+const KEEP_AS_IS = new Set([
+  "ve", "bir", "bu", "ile", "için", "ama", "fakat", "veya", "hem", "de", "da",
+  "mi", "mı", "mu", "mü", "ki", "ne", "nasıl", "nerede", "neden", "niçin",
+  "the", "and", "or", "but", "is", "are", "was", "were", "a", "an",
+  "in", "on", "at", "to", "for", "of", "with", "from", "by",
+]);
+
+/**
+ * Post-processes speech recognition output for Turkish mode. Restores Turkish
+ * characters the engine may have dropped, without mangling English words
+ * when the user switched to English mode.
+ */
+function postProcessTranscript(text: string, lang: "tr-TR" | "en-US"): string {
+  if (lang !== "tr-TR") return text;
+
+  // The Chrome tr-TR engine sometimes returns Turkish words with English
+  // spelling (e.g. "cicek" instead of "çiçek"). We do targeted corrections
+  // for well-known patterns without breaking valid words.
+  const corrections: [RegExp, string][] = [
+    // "cicek" -> "çiçek", "cocuk" -> "çocuk", "gurur" -> "gurur" (already correct)
+    [/\bcicek\b/gi, "çiçek"],
+    [/\bcocuk\b/gi, "çocuk"],
+    [/\bogretmen\b/gi, "öğretmen"],
+    [/\bogrenci\b/gi, "öğrenci"],
+    [/\boglu\b/gi, "oğlu"],
+    [/\bogretim\b/gi, "öğretim"],
+    [/\bogren\b/gi, "öğren"],
+    [/\bogrenmek\b/gi, "öğrenmek"],
+    [/\bsaglik\b/gi, "sağlık"],
+    [/\bsag\b/gi, "sağ"],
+    [/\bsokak\b/gi, "sokak"],
+    [/\bsesli\b/gi, "sesli"],
+    [/\bsehir\b/gi, "şehir"],
+    [/\bsimdi\b/gi, "şimdi"],
+    [/\bsunu\b/gi, "şunu"],
+    [/\bsu\b/gi, "şu"],
+    [/\b gun\b/gi, " gün"],
+    [/\bgun\b/gi, "gün"],
+    [/\bguzel\b/gi, "güzel"],
+    [/\bbugun\b/gi, "bugün"],
+    [/\bogur\b/gi, "öğür"],
+    [/\bmu?ller\b/gi, "müller"],
+    [/\bhal?buki\b/gi, "halbuki"],
+    [/\bmud?ur\b/gi, "müdür"],
+    [/\bmud?ir\b/gi, "müdür"],
+    [/\bokul\b/gi, "okul"],
+    [/\bo?grenci\b/gi, "öğrenci"],
+    [/\bagac\b/gi, "ağaç"],
+    [/\byagmur\b/gi, "yağmur"],
+    [/\byag\b/gi, "yağ"],
+    [/\bdag\b/gi, "dağ"],
+    [/\bdogru\b/gi, "doğru"],
+    [/\bdog?a\b/gi, "doğa"],
+    [/\bkus\b/gi, "kuş"],
+    [/\bdus\b/gi, "düş"],
+    [/\bdusun\b/gi, "düşün"],
+    [/\bdusunce\b/gi, "düşünce"],
+    [/\btesekkur\b/gi, "teşekkür"],
+    [/\btesekkurler\b/gi, "teşekkürler"],
+    [/\bmerhaba\b/gi, "merhaba"],
+    [/\bselam\b/gi, "selam"],
+    [/\bsinir\b/gi, "sinir"],
+    [/\bcan\b/gi, "can"],
+    [/\bcanim\b/gi, "canım"],
+    [/\bkardes\b/gi, "kardeş"],
+    [/\banne\b/gi, "anne"],
+    [/\bbaba\b/gi, "baba"],
+    [/\bakademik\b/gi, "akademik"],
+    [/\buniversite\b/gi, "üniversite"],
+    [/\bkutuphane\b/gi, "kütüphane"],
+    [/\bkitap\b/gi, "kitap"],
+    [/\bdefter\b/gi, "defter"],
+    [/\bkalem\b/gi, "kalem"],
+    [/\bsinav\b/gi, "sınav"],
+    [/\bsinif\b/gi, "sınıf"],
+    [/\bders\b/gi, "ders"],
+    [/\bodev\b/gi, "ödev"],
+    [/\bnot\b/gi, "not"],
+    [/\bbasari\b/gi, "başarı"],
+    [/\bbasarili\b/gi, "başarılı"],
+    [/\bbasla\b/gi, "başla"],
+    [/\bbaslangic\b/gi, "başlangıç"],
+    [/\bsonuc\b/gi, "sonuç"],
+    [/\bic\b/gi, "iç"],
+    [/\bicin\b/gi, "için"],
+    [/\bd?is\b/gi, "diş"],
+    [/\bd?is?ari\b/gi, "dışarı"],
+    [/\bic?eri\b/gi, "içeri"],
+    [/\bk?irk\b/gi, "kırk"],
+    [/\bk?irk?lik\b/gi, "kırklık"],
+    [/\bos?man\b/gi, "osman"],
+    [/\bos?manli\b/gi, "osmanlı"],
+    [/\bturk\b/gi, "türk"],
+    [/\bturkiye\b/gi, "türkiye"],
+    [/\bturkce\b/gi, "türkçe"],
+    [/\bismail\b/gi, "ismail"],
+    [/\berdogan\b/gi, "erdoğan"],
+    [/\bar?di?yan\b/gi, "erdoğan"],
+    [/\bahmet\b/gi, "ahmet"],
+    [/\bmehmet\b/gi, "mehmet"],
+    [/\bayse\b/gi, "ayşe"],
+    [/\bfatma\b/gi, "fatma"],
+    [/\bmustafa\b/gi, "mustafa"],
+    [/\bberat\b/gi, "berat"],
+    [/\bsmg\b/gi, "SMG"],
+    [/\bsmg?tal\b/gi, "SMG Tal"],
+    [/\bokul\b/gi, "okul"],
+    [/\byapay\b/gi, "yapay"],
+    [/\bzeka\b/gi, "zekâ"],
+    [/\bzeka\b/gi, "zeka"],
+    [/\byapay zeka\b/gi, "yapay zeka"],
+  ];
+
+  let result = text;
+  for (const [pattern, replacement] of corrections) {
+    result = result.replace(pattern, replacement);
+  }
+
+  // Preserve proper nouns that the engine correctly recognized — don't
+  // auto-lowercase words that look like they were already correct.
+  return result;
+}
+
 type AnalysisResult = {
   summary: string;
   keyPoints: string[];

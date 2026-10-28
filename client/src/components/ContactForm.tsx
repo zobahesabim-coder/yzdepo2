@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Mail, Send, CheckCircle, Loader } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { toast } from "sonner";
 
 export default function ContactForm() {
@@ -38,6 +38,10 @@ export default function ContactForm() {
 
     setIsSubmitting(true);
     try {
+      if (!isSupabaseConfigured) {
+        toast.error("Veritabanı bağlantısı yapılmamış. Lütfen sayfayı yenileyin.");
+        return;
+      }
       const { error } = await supabase.from("feedbacks").insert({
         name: formData.name,
         email: formData.email,
@@ -45,7 +49,10 @@ export default function ContactForm() {
         message: formData.message,
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error("Supabase insert error:", error);
+        throw error;
+      }
 
       setIsSubmitted(true);
       setFormData({ name: "", email: "", subject: "", message: "" });
@@ -53,9 +60,15 @@ export default function ContactForm() {
       setTimeout(() => {
         setIsSubmitted(false);
       }, 6000);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Form submission error:", error);
-      toast.error("Geri bildirim gönderme sırasında bir hata oluştu");
+      const msg =
+        error?.message?.includes("rate limit")
+          ? "Çok hızlı gönderim yapıyorsunuz, lütfen biraz bekleyin."
+          : error?.message?.includes("permission")
+          ? "İzin hatası: Veritabanı erişimi engellendi."
+          : "Geri bildirim gönderme sırasında bir hata oluştu: " + (error?.message || "Bilinmeyen hata");
+      toast.error(msg);
     } finally {
       setIsSubmitting(false);
     }
