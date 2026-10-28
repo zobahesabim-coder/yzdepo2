@@ -39,21 +39,29 @@ const langFullNames: Record<Language, string> = {
   bash: "Bash",
 };
 
+const POLLINATIONS_API_KEY = "sk_1zl0iJqBjHz8AzzHFp4anukql4ECFB0U";
+
 /**
- * Calls Pollinations.ai free text generation API (no API key, no signup,
- * no limits). Returns the AI-generated text or throws on failure.
- * API: GET https://text.pollinations.ai/{encodedPrompt}
+ * Calls Pollinations.ai text generation API with API key for higher limits.
+ * Uses the OpenAI-compatible POST endpoint for better model access.
  */
 async function fetchAiCode(prompt: string): Promise<string> {
-  const url = `https://text.pollinations.ai/${encodeURIComponent(prompt)}`;
-  const res = await fetch(url, {
-    method: "GET",
-    headers: { "Content-Type": "text/plain" },
+  const res = await fetch("https://text.pollinations.ai/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${POLLINATIONS_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "openai/gpt-5.4-nano",
+      messages: [{ role: "user", content: prompt }],
+    }),
   });
   if (!res.ok) {
     throw new Error(`AI API hatası: HTTP ${res.status}`);
   }
-  const text = await res.text();
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content;
   if (!text || text.trim().length < 5) {
     throw new Error("AI API boş yanıt döndürdü");
   }
