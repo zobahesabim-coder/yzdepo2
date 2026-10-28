@@ -74,7 +74,13 @@ async function fetchAiCode(prompt: string): Promise<string> {
       throw new Error(`AI API hatası: HTTP ${res.status}`);
     }
     const data = await res.json();
-    const text = data?.choices?.[0]?.message?.content;
+    const msg = data?.choices?.[0]?.message;
+    // openai-fast is a reasoning model: it may return plain content OR a
+    // tool_calls array. Handle both so we don't reject valid responses.
+    let text = msg?.content;
+    if (!text && Array.isArray(msg?.tool_calls) && msg.tool_calls.length > 0) {
+      text = msg.tool_calls[0]?.function?.arguments;
+    }
     if (!text || text.trim().length < 5) {
       throw new Error("AI API boş yanıt döndürdü");
     }

@@ -70,7 +70,11 @@ async function translateToEnglish(text: string): Promise<string> {
     }
     if (!res.ok) throw new Error(`Translation API error: HTTP ${res.status}`);
     const data = await res.json();
-    const translated = data?.choices?.[0]?.message?.content?.trim();
+    const msg = data?.choices?.[0]?.message;
+    let translated = msg?.content?.trim();
+    if (!translated && Array.isArray(msg?.tool_calls) && msg.tool_calls.length > 0) {
+      translated = msg.tool_calls[0]?.function?.arguments?.trim();
+    }
     if (!translated || translated.length < 2) return text;
     return translated.replace(/^["']|["']$/g, "").trim();
   };
