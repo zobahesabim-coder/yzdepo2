@@ -52,7 +52,7 @@ async function translateToEnglish(text: string): Promise<string> {
       Authorization: `Bearer ${POLLINATIONS_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "openai/gpt-5.4-nano",
+      model: "openai-fast",
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -88,11 +88,16 @@ export default function LogoGenerator() {
     setIsProcessing(true);
     setIsTranslating(true);
 
+    let translatedName = brandName.trim();
     try {
       // Step 1: Translate Turkish brand name/description to English
-      const translatedName = await translateToEnglish(brandName.trim());
-      setIsTranslating(false);
+      translatedName = await translateToEnglish(brandName.trim());
+    } catch (err) {
+      console.warn("Translation failed, using original text:", err);
+    }
+    setIsTranslating(false);
 
+    try {
       // Step 2: Build the AI image prompt
       const styleInfo = logoStyles.find((s) => s.id === selectedStyle) || logoStyles[0];
       const fullPrompt = `Professional ${styleInfo.promptKeyword} for "${translatedName}". White background, high quality, centered composition, vector style logo.`;

@@ -53,7 +53,7 @@ async function fetchAiCode(prompt: string): Promise<string> {
       Authorization: `Bearer ${POLLINATIONS_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "openai/gpt-5.4-nano",
+      model: "openai-fast",
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -165,7 +165,7 @@ export default function CodingAssistant() {
         explanation,
         language: selectedLang,
         topic: topic.trim(),
-        aiModel: "Pollinations.ai (openai/gpt-5.4-nano)",
+        aiModel: "Pollinations.ai (openai-fast)",
         usedFallback: false,
       };
       setResult(codingResult);
