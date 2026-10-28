@@ -171,17 +171,89 @@ function convertImage(file: File, conv: ConversionType): Promise<Blob> {
   });
 }
 
-// ===== OCR via Tesseract.js =====
+// ===== OCR preprocessing: enhance image for better accuracy =====
+function preprocessImage(file: File): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      // Upscale small images (Tesseract works best at 300+ DPI equivalent)
+      const scale = img.naturalWidth < 1000 ? Math.ceil(1000 / img.naturalWidth) : 1;
+      const w = img.naturalWidth * scale;
+      const h = img.naturalHeight * scale;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        URL.revokeObjectURL(url);
+        reject(new Error("Canvas desteklenmiyor"));
+        return;
+      }
+      // Draw upscaled
+      ctx.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+
+      // Get pixel data for grayscale + contrast
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const data = imageData.data;
+      const contrast = 1.5; // increase contrast
+      const intercept = 128 * (1 - contrast);
+
+      for (let i = 0; i < data.length; i += 4) {
+        // Grayscale (luminosity method)
+        let gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        // Apply contrast
+        gray = gray * contrast + intercept;
+        // Clamp
+        gray = Math.max(0, Math.min(255, gray));
+        data[i] = gray;
+        data[i + 1] = gray;
+        data[i + 2] = gray;
+      }
+      ctx.putImageData(imageData, 0, 0);
+
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("Görüntü önişleme başarısız"));
+        },
+        "image/png"
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Görsel yüklenemedi"));
+    };
+    img.src = url;
+  });
+}
+
+// ===== OCR via Tesseract.js with image preprocessing =====
 async function runOcr(file: File, onProgress: (p: number) => void): Promise<string> {
   const { default: Tesseract } = await import("tesseract.js");
-  const result = await Tesseract.recognize(file, "tur+eng", {
+
+  // Preprocess the image for better OCR accuracy
+  const processedBlob = await preprocessImage(file);
+
+  const result = await Tesseract.recognize(processedBlob, "tur+eng", {
     logger: (m: { status: string; progress: number }) => {
       if (m.status === "recognizing text") {
         onProgress(Math.round(m.progress * 100));
       }
     },
   });
-  return result.data.text.trim();
+
+  // Post-process: clean up common OCR artifacts
+  let text = result.data.text.trim();
+  // Remove excessive blank lines
+  text = text.replace(/\n{3,}/g, "\n\n");
+  // Fix spacing around words that got merged
+  text = text.replace(/([a-zçğıöşü])([A-ZÇĞİÖŞÜ])/g, "$1 $2");
+  // Remove stray single characters on their own lines
+  text = text.replace(/^\s*[a-z]\s*$/gim, "");
+
+  return text;
 }
 
 function downloadBlob(blob: Blob, filename: string) {

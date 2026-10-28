@@ -338,9 +338,9 @@ export default function VoiceTool() {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcriptPart = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          final += transcriptPart + " ";
+          final += postProcessTranscript(transcriptPart, recognitionLang) + " ";
         } else {
-          interim += transcriptPart;
+          interim += postProcessTranscript(transcriptPart, recognitionLang);
         }
       }
       if (final) {
