@@ -45,27 +45,48 @@ type LogoResult = {
  */
 async function translateToEnglish(text: string): Promise<string> {
   const prompt = `Translate the following Turkish text to English. Return ONLY the English translation, nothing else. Text: "${text}"`;
-  const res = await fetch("https://text.pollinations.ai/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${POLLINATIONS_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "openai-fast",
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!res.ok) throw new Error(`Translation API error: HTTP ${res.status}`);
-  const data = await res.json();
-  const translated = data?.choices?.[0]?.message?.content?.trim();
-  if (!translated || translated.length < 2) return text;
-  // Clean up: remove quotes if the API wrapped it
-  return translated.replace(/^["']|["']$/g, "").trim();
+  const doFetch = async () => {
+    const res = await fetch("https://text.pollinations.ai/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${POLLINATIONS_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "openai-fast",
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (res.status === 402) {
+      let wait = 32;
+      try {
+        const body = await res.json();
+        const m = body?.error?.message?.match(/Retry after (\d+)s/i);
+        if (m) wait = Math.min(Number(m[1]) + 2, 60);
+      } catch { /* ignore */ }
+      const err = new Error("RATE_LIMIT");
+      (err as any).retryAfter = wait;
+      throw err;
+    }
+    if (!res.ok) throw new Error(`Translation API error: HTTP ${res.status}`);
+    const data = await res.json();
+    const translated = data?.choices?.[0]?.message?.content?.trim();
+    if (!translated || translated.length < 2) return text;
+    return translated.replace(/^["']|["']$/g, "").trim();
+  };
+  try {
+    return await doFetch();
+  } catch (err: any) {
+    if (err?.retryAfter) {
+      await new Promise((r) => setTimeout(r, err.retryAfter * 1000));
+      return await doFetch();
+    }
+    throw err;
+  }
 }
 
 /**
- * Generates a logo image URL using Pollinations.ai image API (flux model — free, unlimited).
+ * Generates a logo image URL using Pollinations.ai image API (flux model).
  * The prompt is constructed from the translated brand name and selected style.
  */
 function buildLogoImageUrl(englishPrompt: string, seed: number): string {
@@ -254,7 +275,7 @@ export default function LogoGenerator() {
                 <div className="text-center">
                   <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full">
                     <Sparkles className="w-3 h-3" />
-                    Ücretsiz & Limitsiz AI (Flux model)
+                    Ücretsiz AI (Flux) — 30 sn'de 1 istek limiti
                   </span>
                 </div>
               </CardContent>

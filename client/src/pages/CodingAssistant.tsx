@@ -42,30 +42,54 @@ const langFullNames: Record<Language, string> = {
 const POLLINATIONS_API_KEY = "sk_1zl0iJqBjHz8AzzHFp4anukql4ECFB0U";
 
 /**
- * Calls Pollinations.ai text generation API with API key for higher limits.
- * Uses the OpenAI-compatible POST endpoint for better model access.
+ * Calls Pollinations.ai text generation API.
+ * The free tier allows 1 request per 30 seconds per IP; on HTTP 402 we
+ * wait and retry once before giving up.
  */
 async function fetchAiCode(prompt: string): Promise<string> {
-  const res = await fetch("https://text.pollinations.ai/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${POLLINATIONS_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "openai-fast",
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`AI API hatası: HTTP ${res.status}`);
+  const doFetch = async () => {
+    const res = await fetch("https://text.pollinations.ai/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${POLLINATIONS_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "openai-fast",
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (res.status === 402) {
+      let wait = 32;
+      try {
+        const body = await res.json();
+        const m = body?.error?.message?.match(/Retry after (\d+)s/i);
+        if (m) wait = Math.min(Number(m[1]) + 2, 60);
+      } catch { /* ignore parse error */ }
+      const err = new Error(`RATE_LIMIT:${wait}`);
+      (err as any).retryAfter = wait;
+      throw err;
+    }
+    if (!res.ok) {
+      throw new Error(`AI API hatası: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const text = data?.choices?.[0]?.message?.content;
+    if (!text || text.trim().length < 5) {
+      throw new Error("AI API boş yanıt döndürdü");
+    }
+    return text.trim();
+  };
+
+  try {
+    return await doFetch();
+  } catch (err: any) {
+    if (err?.retryAfter) {
+      await new Promise((r) => setTimeout(r, err.retryAfter * 1000));
+      return await doFetch();
+    }
+    throw err;
   }
-  const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
-  if (!text || text.trim().length < 5) {
-    throw new Error("AI API boş yanıt döndürdü");
-  }
-  return text.trim();
 }
 
 /**
@@ -319,7 +343,7 @@ export default function CodingAssistant() {
                 <div className="text-center">
                   <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full">
                     <Sparkles className="w-3 h-3" />
-                    Ücretsiz & Limitsiz AI (Pollinations.ai)
+                    Ücretsiz AI (Pollinations.ai) — 30 sn'de 1 istek limiti
                   </span>
                 </div>
               </CardContent>
